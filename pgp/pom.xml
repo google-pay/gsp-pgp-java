@@ -23,9 +23,9 @@
     <url>https://github.com/google/standard-payments</url>
 
     <scm>
-        <connection>scm:git:git@github.com:google/standard-payments.git</connection>
-        <developerConnection>scm:git:git@github.com:google/standard-payments.git</developerConnection>
-        <url>https://github.com/google/standard-payments</url>
+        <connection>scm:git:git@github.com:google-pay/gsp-pgp-java.git</connection>
+        <developerConnection>scm:git:git@github.com:google-pay/gsp-pgp-java.git</developerConnection>
+        <url>https://github.com/google-pay/gsp-pgp-java</url>
     </scm>
 
     <organization>
