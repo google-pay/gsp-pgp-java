@@ -73,7 +73,7 @@ public final class InteractiveExample {
                         break;
                 }
             } catch (PgpException exception) {
-                System.out.println(exception.getMessage());
+                System.out.println(exception.getCause().getMessage());
             }
 
             System.out.println();
@@ -92,7 +92,11 @@ public final class InteractiveExample {
                     .forEach(key -> {
                         Set<String> userIds = Sets.newHashSet(key.getUserIDs());
                         System.out.println(
-                                String.format("ID: %d, User: %s", key.getKeyID(), userIds)
+                                String.format(
+                                        "ID: %s, User: %s",
+                                        Long.toHexString(key.getKeyID()),
+                                        userIds
+                                )
                         );
                     });
         } catch (IOException exception) {
@@ -124,7 +128,11 @@ public final class InteractiveExample {
                     .forEach(key -> {
                         Set<String> userIds = Sets.newHashSet(key.getUserIDs());
                         System.out.println(
-                                String.format("ID: %d, User: %s", key.getKeyID(), userIds)
+                                String.format(
+                                        "ID: %s, User: %s",
+                                        Long.toHexString(key.getKeyID()),
+                                        userIds
+                                )
                         );
                     });
         } catch (IOException exception) {

@@ -29,6 +29,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -119,7 +120,13 @@ public final class PgpKeyManager implements KeyManager,
                         );
 
                         for (PGPPublicKey key : publicKeys) {
-                            LOGGER.debug("Adding public key: " + key.getKeyID());
+                            LOGGER.debug(
+                                    String.format(
+                                            "Adding public key %s. Fingerprint: %s.",
+                                            Long.toHexString(key.getKeyID()),
+                                            toHex(key.getFingerprint())
+                                    )
+                            );
                             keyUsers.putIfAbsent(key.getKeyID(), Sets.newHashSet(key.getUserIDs()));
                         }
 
@@ -135,6 +142,16 @@ public final class PgpKeyManager implements KeyManager,
         return keyUsers;
     }
 
+    private String toHex(byte[] decimals) {
+        StringBuilder builder = new StringBuilder();
+
+        for (byte decimal : decimals) {
+                builder.append(Integer.toHexString(Byte.toUnsignedInt(decimal)));
+
+        }
+
+        return builder.toString();
+    }
     /**
      * Decodes the input stream in a secret key ring collection.
      * For each key ring, finds the master key. If it is possible to extract the private key from
@@ -159,24 +176,17 @@ public final class PgpKeyManager implements KeyManager,
             Lists.newArrayList(keyRingCollection.getKeyRings())
                     .stream()
                     .filter(keyRing -> {
-                        Optional<PGPSecretKey> masterKeyMatch = getMasterSecretKey(keyRing);
+                        Map<PGPSecretKey, PGPPrivateKey> privateKeys = extractPrivateKeys(keyRing, passphrases);
 
-                        if (masterKeyMatch.isPresent()) {
-                            PGPSecretKey masterKey = masterKeyMatch.get();
-                            Optional<PGPPrivateKey> privateKeyMatch =
-                                    extractPrivateKey(masterKey, passphrases);
-
-                            if (privateKeyMatch.isPresent()) {
-                                keyUsers.putIfAbsent(
-                                        masterKey.getKeyID(), Sets.newHashSet(masterKey.getUserIDs())
-                                );
-                                PGPPrivateKey privateKey = privateKeyMatch.get();
-                                this.privateKeys.put(masterKey.getKeyID(), privateKey);
-                                return true;
-                            }
+                        for (PGPSecretKey secretKey : privateKeys.keySet()) {
+                            keyUsers.putIfAbsent(
+                                    secretKey.getKeyID(), Sets.newHashSet(secretKey.getUserIDs())
+                            );
+                            PGPPrivateKey privateKey = privateKeys.get(secretKey);
+                            this.privateKeys.put(secretKey.getKeyID(), privateKey);
                         }
 
-                        return false;
+                        return !privateKeys.isEmpty();
                     })
                     .forEach(keyRing -> {
                         this.secretKeyRings =
@@ -191,65 +201,51 @@ public final class PgpKeyManager implements KeyManager,
         return keyUsers;
     }
 
-    private Optional<PGPSecretKey> getMasterSecretKey(PGPSecretKeyRing keyRing) {
-        List<PGPSecretKey> secretKeys = Lists.newArrayList(keyRing.getSecretKeys());
-        LOGGER.debug(String.format("Keyring contains %d key(s)", secretKeys.size()));
-
-        return secretKeys
-                .stream()
-                .filter(PGPSecretKey::isMasterKey)
-                .peek(key -> LOGGER.debug("Secret master key: " + key.getKeyID()))
-                .findAny();
-    }
-
-    private Optional<PGPPrivateKey> extractPrivateKey(
-            PGPSecretKey secretKey, char[]... passphrases
+    private Map<PGPSecretKey, PGPPrivateKey> extractPrivateKeys(
+            PGPSecretKeyRing secretKeyRing, char[]... passphrases
     ) {
-        Optional<PGPPrivateKey> result = Optional.empty();
+        Map<PGPSecretKey, PGPPrivateKey> privateKeys = new HashMap<>();
 
         for (char[] passphrase : passphrases) {
             PBESecretKeyDecryptor decryptor =
                     new BcPBESecretKeyDecryptorBuilder(this.digestCalculatorProvider)
                             .build(passphrase);
-            try {
-                PGPPrivateKey privateKey = secretKey.extractPrivateKey(decryptor);
-                LOGGER.debug(
-                        String.format("Extracted private key %d from secret key %d",
-                                privateKey.getKeyID(),
-                                secretKey.getKeyID())
-                );
-                result = Optional.of(privateKey);
-                break;
-            } catch (PGPException exception) {
-                LOGGER.debug(
-                        String.format("Private key extraction failed for key: %d. Cause: %s",
-                                secretKey.getKeyID(),
-                                exception.getMessage())
-                );
+            for (PGPSecretKey secretKey : Lists.newArrayList(secretKeyRing.getSecretKeys())) {
+                try {
+                    PGPPrivateKey privateKey = secretKey.extractPrivateKey(decryptor);
+                    LOGGER.debug(
+                            String.format("Extracted private key %s from secret key %s",
+                                    Long.toHexString(privateKey.getKeyID()),
+                                    Long.toHexString(secretKey.getKeyID()))
+                    );
+                    privateKeys.put(secretKey, privateKey);
+                } catch (PGPException exception) {
+                    LOGGER.debug(
+                            String.format("Private key extraction failed for key: %s. Cause: %s",
+                                    Long.toHexString(secretKey.getKeyID()),
+                                    exception.getMessage())
+                    );
+                }
             }
         }
 
-        if (!result.isPresent()) {
-            LOGGER.error(
-                    String.format("Tried to extract private key from secret key %d but failed",
-                            secretKey.getKeyID()
-                    )
-            );
+        if (privateKeys.isEmpty()) {
+            LOGGER.error("Tried to extract private key from secret key ring but failed");
         }
 
-        return result;
+        return privateKeys;
     }
 
     /**
      * Returns a list of the public keys corresponding to the user IDs.
-     * If no user IDs are passed, all the keys are returned.
+     * If no user IDs are passed, all the encryption keys are returned.
      *
      * @param userIds the user IDs of the owners of the keys
      * @return a list of public keys.
      */
     @Override
     public List<PGPPublicKey> getPublicKeys(String... userIds) {
-        Predicate<PGPPublicKey> filter = PGPPublicKey::isMasterKey;
+        Predicate<PGPPublicKey> filter = PGPPublicKey::isEncryptionKey;
 
         if (userIds != null && userIds.length > 0) {
             Set<String> uniqueUserIds = Sets.newHashSet(userIds);
@@ -275,14 +271,14 @@ public final class PgpKeyManager implements KeyManager,
 
     /**
      * Returns a list of the secret keys corresponding to the user IDs.
-     * If no user IDs are passed, all the keys are returned.
+     * If no user IDs are passed, all the signing keys are returned.
      *
      * @param userIds the user IDs of the owners of the keys
      * @return a list of secret keys.
      */
     @Override
     public List<PGPSecretKey> getSecretKeys(String... userIds) {
-        Predicate<PGPSecretKey> filter = PGPSecretKey::isMasterKey;
+        Predicate<PGPSecretKey> filter = PGPSecretKey::isSigningKey;
 
         if (userIds != null && userIds.length > 0) {
             Set<String> uniqueUserIds = Sets.newHashSet(userIds);

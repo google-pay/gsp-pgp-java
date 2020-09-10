@@ -451,8 +451,8 @@ public final class PgpEncryptor {
         for (PGPSecretKey key : keys) {
             builder.append(
                     String.format(
-                            "Key ID [%d] User[%s]\n",
-                            key.getKeyID(),
+                            "Key ID [%s] User[%s]\n",
+                            Long.toHexString(key.getKeyID()),
                             Lists.newArrayList(key.getUserIDs())
                     )
             );
@@ -467,8 +467,8 @@ public final class PgpEncryptor {
         for (PGPPublicKey key : keys) {
             builder.append(
                     String.format(
-                            "Key ID [%d] User[%s]\n",
-                            key.getKeyID(),
+                            "Key ID [%s] User[%s]\n",
+                            Long.toHexString(key.getKeyID()),
                             Lists.newArrayList(key.getUserIDs())
                     )
             );
@@ -482,14 +482,12 @@ public final class PgpEncryptor {
     ) throws PgpDecryptionException {
         return Lists.newArrayList(encryptedDataList.getEncryptedDataObjects())
                 .stream()
-                .filter(
-                        data -> data instanceof PGPPublicKeyEncryptedData && decryptionKeyExists(
-                                (PGPPublicKeyEncryptedData) data, decryptionKeys
-                        )
-                )
+                .filter(data -> data instanceof PGPPublicKeyEncryptedData)
                 .map(data -> (PGPPublicKeyEncryptedData) data)
+                .peek(data -> LOGGER.debug("Data encrypted with key: " + Long.toHexString(data.getKeyID())))
+                .filter(data -> decryptionKeyExists(data, decryptionKeys))
                 .peek(data -> LOGGER.debug(
-                        "Decryptable data found. Encrypted with public key: " +  data.getKeyID()
+                        "Decryptable data found. Encrypted with public key: " +  Long.toHexString(data.getKeyID())
                         )
                 )
                 .findAny()
@@ -518,7 +516,7 @@ public final class PgpEncryptor {
               return publicKey.getKeyID() == publicKeyEncryptedData.getKeyID() && privateKeyExists;
             })
             .map(key -> this.keyProvider.getPrivateKey(key.getKeyID()).get())
-            .peek(key -> LOGGER.debug("Found decryption key: " + key.getKeyID()))
+            .peek(key -> LOGGER.debug("Found decryption key: " + Long.toHexString(key.getKeyID())))
             .findAny();
     }
 
@@ -530,7 +528,7 @@ public final class PgpEncryptor {
 
             Optional<PGPPublicKey> possibleVerifyingKey = signatureVerifyingKeys.stream()
                     .filter(key -> key.getKeyID() == signatureKeyId)
-                    .peek(key -> LOGGER.debug("One-pass signature matches key: " + key.getKeyID()))
+                    .peek(key -> LOGGER.debug("One-pass signature matches key: " + Long.toHexString(key.getKeyID())))
                     .findAny();
 
             if (possibleVerifyingKey.isPresent()) {
@@ -566,7 +564,7 @@ public final class PgpEncryptor {
                 .stream()
                 .filter(signature -> signature.getKeyID() == onePassSignature.getKeyID())
                 .peek(signature ->
-                        LOGGER.debug("One-pass matched signature of key: " + signature.getKeyID())
+                        LOGGER.debug("One-pass matched signature of key: " + Long.toHexString(signature.getKeyID()))
                 )
                 .findAny();
 
