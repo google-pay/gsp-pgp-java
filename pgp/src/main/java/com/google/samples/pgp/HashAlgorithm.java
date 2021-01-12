@@ -13,17 +13,13 @@
 // limitations under the License.
 package com.google.samples.pgp;
 
-import org.bouncycastle.openpgp.PGPException;
-
 /**
- * Custom base exception.
+ * Supported hash algorithms
  */
-public class PgpException extends PGPException {
-    public PgpException(String message, Exception innerException) {
-        super(message, innerException);
-    }
-
-    public PgpException(String message) {
-        super(message);
-    }
+public enum HashAlgorithm {
+    MD5,
+    RIPEMD_160,
+    SHA_256,
+    SHA_512,
+    TIGER_192,
 }

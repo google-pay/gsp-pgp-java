@@ -13,17 +13,12 @@
 // limitations under the License.
 package com.google.samples.pgp;
 
-import org.bouncycastle.openpgp.PGPException;
-
 /**
- * Custom base exception.
+ * Supported binary-to-text encodings
  */
-public class PgpException extends PGPException {
-    public PgpException(String message, Exception innerException) {
-        super(message, innerException);
-    }
-
-    public PgpException(String message) {
-        super(message);
-    }
+public enum BinaryToTextEncoding {
+    NONE,
+    BASE32,
+    BASE64,
+    BASE64_URL,
 }

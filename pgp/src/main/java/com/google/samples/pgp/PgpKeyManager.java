@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,11 +64,12 @@ public final class PgpKeyManager implements KeyManager,
         Security.addProvider(new BouncyCastleProvider());
     }
 
-    private Map<Long, PGPPrivateKey> privateKeys;
     private PGPSecretKeyRingCollection secretKeyRings;
     private PGPPublicKeyRingCollection publicKeyRings;
-    private KeyFingerPrintCalculator keyFingerPrintCalculator;
-    private PGPDigestCalculatorProvider digestCalculatorProvider;
+
+    private final Map<Long, PGPPrivateKey> privateKeys;
+    private final KeyFingerPrintCalculator keyFingerPrintCalculator;
+    private final PGPDigestCalculatorProvider digestCalculatorProvider;
 
     public static PgpKeyManager getInstance() {
         if (INSTANCE == null) {
@@ -146,8 +147,7 @@ public final class PgpKeyManager implements KeyManager,
         StringBuilder builder = new StringBuilder();
 
         for (byte decimal : decimals) {
-                builder.append(Integer.toHexString(Byte.toUnsignedInt(decimal)));
-
+            builder.append(Integer.toHexString(Byte.toUnsignedInt(decimal)));
         }
 
         return builder.toString();
@@ -230,7 +230,7 @@ public final class PgpKeyManager implements KeyManager,
         }
 
         if (privateKeys.isEmpty()) {
-            LOGGER.error("Tried to extract private key from secret key ring but failed");
+            LOGGER.warn("Tried to extract private key from secret key ring but failed");
         }
 
         return privateKeys;
@@ -246,8 +246,9 @@ public final class PgpKeyManager implements KeyManager,
     @Override
     public List<PGPPublicKey> getPublicKeys(String... userIds) {
         Predicate<PGPPublicKey> filter = PGPPublicKey::isEncryptionKey;
+        boolean filterUserIds = userIds != null && userIds.length > 0;
 
-        if (userIds != null && userIds.length > 0) {
+        if (filterUserIds) {
             Set<String> uniqueUserIds = Sets.newHashSet(userIds);
             Predicate<PGPPublicKey> userFilter = key -> Sets.newHashSet(key.getUserIDs())
                     .stream()
@@ -255,8 +256,15 @@ public final class PgpKeyManager implements KeyManager,
             filter = filter.and(userFilter);
         }
 
-        return getPublicKeyStream(filter, key -> key)
+        List<PGPPublicKey> keys = getPublicKeyStream(filter, key -> key)
                 .collect(Collectors.toList());
+
+        if (filterUserIds && keys.size() < userIds.length) {
+            String ids = String.join(",", userIds);
+            throw new KeySearchException("Not all public keys were retrieved. User IDs: " + ids);
+        }
+
+        return keys;
     }
 
     private <T> Stream<T> getPublicKeyStream(
@@ -279,8 +287,9 @@ public final class PgpKeyManager implements KeyManager,
     @Override
     public List<PGPSecretKey> getSecretKeys(String... userIds) {
         Predicate<PGPSecretKey> filter = PGPSecretKey::isSigningKey;
+        boolean filterUserIds = userIds != null && userIds.length > 0;
 
-        if (userIds != null && userIds.length > 0) {
+        if (filterUserIds) {
             Set<String> uniqueUserIds = Sets.newHashSet(userIds);
             Predicate<PGPSecretKey> userFilter = key -> Sets.newHashSet(key.getUserIDs())
                     .stream()
@@ -288,8 +297,15 @@ public final class PgpKeyManager implements KeyManager,
             filter = filter.and(userFilter);
         }
 
-        return getSecretKeyStream(filter, key -> key)
+        List<PGPSecretKey> keys = getSecretKeyStream(filter, key -> key)
                 .collect(Collectors.toList());
+
+        if (filterUserIds && keys.size() < userIds.length) {
+            String ids = String.join(",", userIds);
+            throw new KeySearchException("Not all secret keys were retrieved. User IDs: " + ids);
+        }
+
+        return keys;
     }
 
     private <T> Stream<T> getSecretKeyStream(

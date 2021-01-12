@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,5 +23,5 @@ import java.util.Set;
 public interface KeyManager {
     Map<Long, Set<String>> addPublicKeys(InputStream inputStream) throws KeyManagementException;
     Map<Long, Set<String>> addSecretKeys(InputStream inputStream, char[]... passphrases)
-        throws KeyManagementException;
+            throws KeyManagementException;
 }

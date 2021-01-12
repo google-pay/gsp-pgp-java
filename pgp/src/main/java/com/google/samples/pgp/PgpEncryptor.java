@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.Security;
@@ -28,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
@@ -76,26 +78,53 @@ public final class PgpEncryptor {
         Security.addProvider(new BouncyCastleProvider());
     }
 
-    private int hashAlgorithm;
+    private Charset charset;
     private boolean asciiArmour;
-    private PGPDataEncryptorBuilder dataEncryptorBuilder;
-    private KeyProvider<PGPPublicKey, PGPSecretKey, PGPPrivateKey> keyProvider;
+    private BinaryToTextEncoding binaryToTextEncoding;
 
+    private final HashAlgorithm hashAlgorithm;
+    private final PGPDataEncryptorBuilder dataEncryptorBuilder;
+    private final SymmetricKeyBlockCipher symmetricKeyBlockCipher;
+    private final KeyProvider<PGPPublicKey, PGPSecretKey, PGPPrivateKey> keyProvider;
+
+    /**
+     * Minimal configuration.
+     * Uses SHA-256 as the hash algorithm and AES-256 as the block cipher.
+     * Also assumes Base64 URL encoding.
+     * @param keyProvider An implementation of the KeyProvider interface
+     */
     public PgpEncryptor(KeyProvider<PGPPublicKey, PGPSecretKey, PGPPrivateKey> keyProvider) {
-        this(keyProvider, PGPUtil.SHA256, SymmetricKeyAlgorithmTags.AES_256);
+        this(keyProvider, HashAlgorithm.SHA_256, SymmetricKeyBlockCipher.AES_256);
+        this.binaryToTextEncoding = BinaryToTextEncoding.BASE64_URL;
     }
 
     public PgpEncryptor(
             KeyProvider<PGPPublicKey, PGPSecretKey, PGPPrivateKey> keyProvider,
-            int hashAlgorithm,
-            int symmetricKeyAlgorithmTags
+            HashAlgorithm hashAlgorithm,
+            SymmetricKeyBlockCipher symmetricKeyBlockCipher
     ) {
         LOGGER.debug("Initialising encryptor");
+
+        if (keyProvider == null || hashAlgorithm == null || symmetricKeyBlockCipher == null) {
+            throw new IllegalArgumentException("Missing argument");
+        }
+
         this.keyProvider = keyProvider;
         this.hashAlgorithm = hashAlgorithm;
-        this.dataEncryptorBuilder = new BcPGPDataEncryptorBuilder(symmetricKeyAlgorithmTags)
+        this.symmetricKeyBlockCipher = symmetricKeyBlockCipher;
+        this.dataEncryptorBuilder = new BcPGPDataEncryptorBuilder(
+                this.getSymmetricAlgorithmCode(this.symmetricKeyBlockCipher)
+        )
                 .setSecureRandom(new SecureRandom())
                 .setWithIntegrityPacket(true);
+
+        this.charset = StandardCharsets.UTF_8;
+        this.binaryToTextEncoding = BinaryToTextEncoding.NONE;
+    }
+
+    public PgpEncryptor setCharset(Charset charset) {
+        this.charset = charset;
+        return this;
     }
 
     /**
@@ -119,68 +148,112 @@ public final class PgpEncryptor {
     }
 
     /**
-     * Produces a cipher text that is encrypted with all the public keys in the PgpKeyProvider
-     * keyring and signs with all the secret keys in the PgpKeyProvider keyring.
+     * Sets the binary-to-text encoding scheme to be used when encrypting/decrypting text.
      *
-     * @param plainText the plain text to encrypt
-     * @return the signed cipher text
-     * @throws PgpEncryptionException if the encryption fails
+     * @param binaryToTextEncoding the binary-to-text encoding scheme
+     * @return the instance itself
      */
-    public String encrypt(String plainText) throws PgpEncryptionException {
-        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys();
-        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys();
-        return encrypt(plainText, encryptionKeys, signingKeys);
+    public PgpEncryptor setBinaryToTextEncoding(BinaryToTextEncoding binaryToTextEncoding) {
+        this.binaryToTextEncoding = binaryToTextEncoding;
+        return this;
     }
 
     /**
-     * Produces cipher text that is encrypted with the public keys belonging to all the recipients
-     * and signs the message with the private keys of all the senders.
-     *
-     *
-     * @param plainText the plain text to encrypt
-     * @param senders a string array with the user identifiers of the senders
-     * @param recipients a string array with the user identifiers of the recipients
-     * @return the signed cipher text
-     * @throws PgpEncryptionException if the encryption fails
+     * Mapping of the HashAlgorithm enum to implementation specific int values
      */
-    public String encrypt(String plainText, String[] senders, String[] recipients)
-        throws PgpEncryptionException {
-        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys(recipients);
-        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys(senders);
-        return encrypt(plainText, encryptionKeys, signingKeys);
-    }
-
-    private String encrypt(
-            String plainText, List<PGPPublicKey> encryptionKeys, List<PGPSecretKey> signingKeys
-    ) throws PgpEncryptionException {
-        try (InputStream input =
-                     new ByteArrayInputStream(plainText.getBytes(StandardCharsets.UTF_8))) {
-            byte[] output = encrypt(input, encryptionKeys, signingKeys);
-
-            if (this.asciiArmour) {
-                return new String(output, StandardCharsets.UTF_8);
-            }
-
-            return BaseEncoding.base64Url().encode(output);
-        } catch (IOException exception) {
-            throw new PgpEncryptionException("Plain text reading error", exception);
+    private int getHashAlgorithmCode(HashAlgorithm hashAlgorithm) {
+        switch (hashAlgorithm) {
+            case MD5:
+                return PGPUtil.MD5;
+            case SHA_256:
+                return PGPUtil.SHA256;
+            case SHA_512:
+                return PGPUtil.SHA512;
+            case RIPEMD_160:
+                return PGPUtil.RIPEMD160;
+            case TIGER_192:
+                return PGPUtil.TIGER_192;
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported hash algorithm: " + hashAlgorithm
+                );
         }
     }
 
-    private byte[] encrypt(
-        InputStream inputStream, List<PGPPublicKey> encryptionKeys, List<PGPSecretKey> signingKeys
+    /**
+     * Mapping of the SymmetricKeyBlockCipher enum to implementation specific int values
+     */
+    private int getSymmetricAlgorithmCode(SymmetricKeyBlockCipher symmetricKeyBlockCipher) {
+        switch (symmetricKeyBlockCipher) {
+            case AES_256:
+                return SymmetricKeyAlgorithmTags.AES_256;
+            case BLOWFISH:
+                return SymmetricKeyAlgorithmTags.BLOWFISH;
+            case CAMELLIA_256:
+                return SymmetricKeyAlgorithmTags.CAMELLIA_256;
+            case TWOFISH:
+                return SymmetricKeyAlgorithmTags.TWOFISH;
+            case TRIPLE_DES:
+                return SymmetricKeyAlgorithmTags.TRIPLE_DES;
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported symmetric key block cipher: " + symmetricKeyBlockCipher
+                );
+        }
+    }
+
+    /**
+     * Produces a cipher message that is encrypted with all the public keys in the PgpKeyProvider
+     * keyring and signs with all the secret keys in the PgpKeyProvider keyring.
+     *
+     * @param plainStream stream to read the plain message from
+     * @param cipherStream stream to write the cipher message to
+     * @throws PgpEncryptionException if the encryption fails
+     */
+    public void encrypt(
+            InputStream plainStream, OutputStream cipherStream
+    ) throws PgpEncryptionException {
+        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys();
+        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys();
+        encrypt(plainStream, cipherStream, encryptionKeys, signingKeys);
+    }
+
+    /**
+     * Produces cipher message encrypted with the public keys belonging to all the recipients and
+     * signs the message with the private keys of all the senders.
+     *
+     * @param plainStream stream to read the plain message from
+     * @param cipherStream stream to write the cipher message to
+     * @param senders a string array with the user identifiers of the senders
+     * @param recipients a string array with the user identifiers of the recipients
+     * @throws PgpEncryptionException if the encryption fails
+     */
+    public void encrypt(
+            InputStream plainStream,
+            OutputStream cipherStream,
+            String[] senders,
+            String[] recipients
+    ) throws PgpEncryptionException {
+        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys(recipients);
+        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys(senders);
+        encrypt(plainStream, cipherStream, encryptionKeys, signingKeys);
+    }
+
+    private void encrypt(
+            InputStream plainStream,
+            OutputStream cipherStream,
+            List<PGPPublicKey> encryptionKeys,
+            List<PGPSecretKey> signingKeys
     ) throws PgpEncryptionException {
         LOGGER.debug("Encryption keys: \n" + serialisePublicKeys(encryptionKeys));
         LOGGER.debug("Signing keys: \n" + serialiseSecretKeys(signingKeys));
 
-        try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+        try {
             if (this.asciiArmour) {
-                writeArmoredCipherText(inputStream, outputStream, encryptionKeys, signingKeys);
+                writeArmoredCipherText(plainStream, cipherStream, encryptionKeys, signingKeys);
             } else {
-                writeCipherText(inputStream, outputStream, encryptionKeys, signingKeys);
+                writeCipherText(plainStream, cipherStream, encryptionKeys, signingKeys);
             }
-
-            return outputStream.toByteArray();
         } catch (IllegalStateException | IOException | PGPException exception) {
             throw new PgpEncryptionException("Cipher text writing error", exception);
         }
@@ -275,14 +348,16 @@ public final class PgpEncryptor {
         for (PGPSecretKey signingKey : signingKeys) {
             PGPPublicKey publicKey = signingKey.getPublicKey();
             PGPContentSignerBuilder contentSignerBuilder =
-                    new BcPGPContentSignerBuilder(publicKey.getAlgorithm(), this.hashAlgorithm);
+                    new BcPGPContentSignerBuilder(
+                            publicKey.getAlgorithm(), this.getHashAlgorithmCode(this.hashAlgorithm)
+                    );
             PGPSignatureGenerator signatureGenerator =
                     new PGPSignatureGenerator(contentSignerBuilder);
 
             Long signingKeyId = signingKey.getKeyID();
             PGPPrivateKey privateKey =
-                this.keyProvider.getPrivateKey(signingKeyId)
-                .orElseThrow(() -> new PgpEncryptionException("Unknown key: " + signingKeyId));
+                    this.keyProvider.getPrivateKey(signingKeyId)
+                            .orElseThrow(() -> new PgpEncryptionException("Unknown key: " + signingKeyId));
 
             signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, privateKey);
 
@@ -310,7 +385,7 @@ public final class PgpEncryptor {
         try (OutputStream literalOutputStream =
                      literalDataGenerator.open(
                              outputStream,
-                             PGPLiteralData.UTF8,
+                             PGPLiteralData.BINARY,
                              PGPLiteralData.CONSOLE,
                              PGPLiteralData.NOW,
                              new byte[BUFFER_SIZE])) {
@@ -330,62 +405,127 @@ public final class PgpEncryptor {
     }
 
     /**
-     * Produces the decrypted plain text of a cipher text.
+     * Produces a cipher text that is encrypted with all the public keys in the PgpKeyProvider
+     * keyring and signs with all the secret keys in the PgpKeyProvider keyring.
+     *
+     * @param plainText the plain text to encrypt
+     * @return the signed cipher text
+     * @throws PgpEncryptionException if the encryption fails
+     */
+    public String encrypt(String plainText) throws PgpEncryptionException {
+        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys();
+        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys();
+        return encrypt(plainText, encryptionKeys, signingKeys);
+    }
+
+    /**
+     * Produces cipher text that is encrypted with the public keys belonging to all the recipients
+     * and signs the message with the private keys of all the senders.
+     *
+     * @param plainText the plain text to encrypt
+     * @param senders a string array with the user identifiers of the senders
+     * @param recipients a string array with the user identifiers of the recipients
+     * @return the signed cipher text
+     * @throws PgpEncryptionException if the encryption fails
+     */
+    public String encrypt(String plainText, String[] senders, String[] recipients)
+            throws PgpEncryptionException {
+        List<PGPPublicKey> encryptionKeys = this.keyProvider.getPublicKeys(recipients);
+        List<PGPSecretKey> signingKeys = this.keyProvider.getSecretKeys(senders);
+        return encrypt(plainText, encryptionKeys, signingKeys);
+    }
+
+    private String encrypt(
+            String plainText, List<PGPPublicKey> encryptionKeys, List<PGPSecretKey> signingKeys
+    ) throws PgpEncryptionException {
+        try (InputStream plainStream = new ByteArrayInputStream(plainText.getBytes(this.charset));
+             ByteArrayOutputStream cipherStream = new ByteArrayOutputStream()) {
+            encrypt(plainStream, cipherStream, encryptionKeys, signingKeys);
+            byte[] output = cipherStream.toByteArray();
+
+            if (this.asciiArmour) {
+                return new String(output, this.charset);
+            }
+
+            return encodeText(output);
+        } catch (IOException exception) {
+            throw new PgpEncryptionException("Read/write error", exception);
+        }
+    }
+
+    private String encodeText(byte[] input) {
+        switch (this.binaryToTextEncoding) {
+            case BASE32:
+                return BaseEncoding.base32().encode(input);
+            case BASE64:
+                return BaseEncoding.base64().encode(input);
+            case BASE64_URL:
+                return BaseEncoding.base64Url().encode(input);
+            case NONE:
+                return new String(input, this.charset);
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported binary-to-text encoding scheme: " + this.binaryToTextEncoding
+                );
+        }
+    }
+
+    /**
+     * Produces the decrypted plain stream of a cipher stream.
      * All the secret keys of the PgpKeyProvider will be tested to try to decrypt the cipher text
      * until one works. All the public keys of the PgpKeyProvider will be tested to try to verify
      * the signature until one works.
      *
-     * @param cipherText the cipher text to decrypt
-     * @return the plain text
+     * @param cipherStream stream to read the cipher message from
+     * @param plainStream stream to write the plain message to
      * @throws PgpDecryptionException if the decryption fails
      */
-    public String decrypt(String cipherText) throws PgpDecryptionException {
+    public void decrypt(
+            InputStream cipherStream, OutputStream plainStream
+    ) throws PgpDecryptionException {
         List<PGPSecretKey> decryptionKeys = this.keyProvider.getSecretKeys();
         List<PGPPublicKey> verifyingKeys = this.keyProvider.getPublicKeys();
-        return decrypt(cipherText, verifyingKeys, decryptionKeys);
+        decrypt(cipherStream, plainStream, verifyingKeys, decryptionKeys);
     }
 
     /**
-     * Produces the decrypted plain text of a cipher text.
-     * The secret key of all of the recipients will be used to decrypt the cipher text until one
-     * works. The public keys of all of the senders will be used to verify the signature until one
-     * works.
+     * Produces the decrypted plain stream of a cipher stream.
+     * All the secret keys of the PgpKeyProvider will be tested to try to decrypt the cipher text
+     * until one works. All the public keys of the PgpKeyProvider will be tested to try to verify
+     * the signature until one works.
      *
-     * @param cipherText the cipher text to decrypt
+     * @param cipherStream stream to read the cipher message from
+     * @param plainStream stream to write the plain message to
      * @param senders a string array with the user identifiers of the senders
      * @param recipients a string array with the user identifiers of the recipients
-     * @return the plain text
      * @throws PgpDecryptionException if the decryption fails
      */
-    public String decrypt(String cipherText, String[] senders, String[] recipients)
-        throws PgpDecryptionException {
+    public void decrypt(
+            InputStream cipherStream,
+            OutputStream plainStream,
+            String[] senders,
+            String[] recipients
+    ) throws PgpDecryptionException {
         List<PGPSecretKey> decryptionKeys = this.keyProvider.getSecretKeys(recipients);
         List<PGPPublicKey> verifyingKeys = this.keyProvider.getPublicKeys(senders);
-        return decrypt(cipherText, verifyingKeys, decryptionKeys);
+        decrypt(cipherStream, plainStream, verifyingKeys, decryptionKeys);
     }
 
-    private String decrypt(
-        String cipherText, List<PGPPublicKey> verifyingKeys, List<PGPSecretKey> decryptionKeys
-    ) throws PgpDecryptionException {
-        InputStream inputStream =
-                new ByteArrayInputStream(BaseEncoding.base64Url().decode(cipherText));
-        byte[] plainText = decrypt(inputStream, verifyingKeys, decryptionKeys);
-        return new String(plainText, StandardCharsets.UTF_8);
-    }
-
-    private byte[] decrypt(
-        InputStream inputStream, List<PGPPublicKey> verifyingKeys, List<PGPSecretKey> decryptionKeys
+    private void decrypt(
+            InputStream cipherStream,
+            OutputStream plainStream,
+            List<PGPPublicKey> verifyingKeys,
+            List<PGPSecretKey> decryptionKeys
     ) throws PgpDecryptionException {
         LOGGER.debug("Verifying keys: \n" + serialisePublicKeys(verifyingKeys));
         LOGGER.debug("Decryption keys: \n" + serialiseSecretKeys(decryptionKeys));
 
         try {
-            InputStream decodedInputStream = PGPUtil.getDecoderStream(inputStream);
+            InputStream decodedInputStream = PGPUtil.getDecoderStream(cipherStream);
             PGPObjectFactory pgpObjectFactory = new BcPGPObjectFactory(decodedInputStream);
             Optional<PGPOnePassSignature> possibleOnePassSignature = Optional.empty();
             PGPPublicKeyEncryptedData publicKeyEncryptedData = null;
             boolean signatureVerified = false;
-            byte[] plainText = null;
 
             Object pgpObject;
 
@@ -418,7 +558,7 @@ public final class PgpEncryptor {
                     PGPOnePassSignature onePassSignature = possibleOnePassSignature.orElseThrow(
                             () -> new PgpDecryptionException("No one pass signature present.")
                     );
-                    plainText = readLiteralData((PGPLiteralData) pgpObject, onePassSignature);
+                    readLiteralData(plainStream, (PGPLiteralData) pgpObject, onePassSignature);
                 } else if (pgpObject instanceof PGPSignatureList) {
                     LOGGER.debug("Verifying signature");
                     PGPOnePassSignature onePassSignature = possibleOnePassSignature.orElseThrow(
@@ -438,8 +578,6 @@ public final class PgpEncryptor {
             if (!signatureVerified) {
                 throw new PgpDecryptionException("Signature not verified");
             }
-
-            return plainText;
         } catch (IOException | PGPException exception) {
             throw new PgpDecryptionException("Cipher text reading error", exception);
         }
@@ -509,15 +647,15 @@ public final class PgpEncryptor {
     ) {
 
         return decryptionKeys.stream()
-            .filter(key -> {
-              PGPPublicKey publicKey = key.getPublicKey();
-              boolean privateKeyExists = this.keyProvider.getPrivateKey(key.getKeyID())
-                      .isPresent();
-              return publicKey.getKeyID() == publicKeyEncryptedData.getKeyID() && privateKeyExists;
-            })
-            .map(key -> this.keyProvider.getPrivateKey(key.getKeyID()).get())
-            .peek(key -> LOGGER.debug("Found decryption key: " + Long.toHexString(key.getKeyID())))
-            .findAny();
+                .filter(key -> {
+                    PGPPublicKey publicKey = key.getPublicKey();
+                    boolean privateKeyExists = this.keyProvider.getPrivateKey(key.getKeyID())
+                            .isPresent();
+                    return publicKey.getKeyID() == publicKeyEncryptedData.getKeyID() && privateKeyExists;
+                })
+                .map(key -> this.keyProvider.getPrivateKey(key.getKeyID()).get())
+                .peek(key -> LOGGER.debug("Found decryption key: " + Long.toHexString(key.getKeyID())))
+                .findAny();
     }
 
     private Optional<PGPOnePassSignature> getVerifiableOnePassSignature(
@@ -541,9 +679,11 @@ public final class PgpEncryptor {
         return Optional.empty();
     }
 
-    private byte[] readLiteralData(PGPLiteralData literalData, PGPOnePassSignature onePassSignature)
-            throws IOException {
-        ByteArrayOutputStream plainText = new ByteArrayOutputStream();
+    private void readLiteralData(
+            OutputStream plainMessage,
+            PGPLiteralData literalData,
+            PGPOnePassSignature onePassSignature
+    ) throws IOException {
         InputStream dataStream = literalData.getDataStream();
 
         byte[] buffer = new byte[BUFFER_SIZE];
@@ -551,10 +691,8 @@ public final class PgpEncryptor {
 
         while ((readBytes = dataStream.read(buffer)) >= 0) {
             onePassSignature.update(buffer, 0, readBytes);
-            plainText.write(buffer, 0, readBytes);
+            plainMessage.write(buffer, 0, readBytes);
         }
-
-        return plainText.toByteArray();
     }
 
     private boolean verifyAnySignature(
@@ -571,6 +709,73 @@ public final class PgpEncryptor {
         PGPSignature signature = possibleSignature.orElseThrow(
                 () -> new PgpDecryptionException("No matching signature present"));
         return onePassSignature.verify(signature);
+    }
+
+    /**
+     * Produces the decrypted plain text of a cipher text.
+     * All the secret keys of the PgpKeyProvider will be tested to try to decrypt the cipher text
+     * until one works. All the public keys of the PgpKeyProvider will be tested to try to verify
+     * the signature until one works.
+     *
+     * @param cipherText the cipher text to decrypt
+     * @return the plain text
+     * @throws PgpDecryptionException if the decryption fails
+     */
+    public String decrypt(String cipherText) throws PgpDecryptionException {
+        List<PGPSecretKey> decryptionKeys = this.keyProvider.getSecretKeys();
+        List<PGPPublicKey> verifyingKeys = this.keyProvider.getPublicKeys();
+        return decrypt(cipherText, verifyingKeys, decryptionKeys);
+    }
+
+    /**
+     * Produces the decrypted plain text of a cipher text.
+     * The secret key of all of the recipients will be used to decrypt the cipher text until one
+     * works. The public keys of all of the senders will be used to verify the signature until one
+     * works.
+     *
+     * @param cipherText the cipher text to decrypt
+     * @param senders a string array with the user identifiers of the senders
+     * @param recipients a string array with the user identifiers of the recipients
+     * @return the plain text
+     * @throws PgpDecryptionException if the decryption fails
+     */
+    public String decrypt(String cipherText, String[] senders, String[] recipients)
+            throws PgpDecryptionException {
+        List<PGPSecretKey> decryptionKeys = this.keyProvider.getSecretKeys(recipients);
+        List<PGPPublicKey> verifyingKeys = this.keyProvider.getPublicKeys(senders);
+        return decrypt(cipherText, verifyingKeys, decryptionKeys);
+    }
+
+    private String decrypt(
+            String cipherText, List<PGPPublicKey> verifyingKeys, List<PGPSecretKey> decryptionKeys
+    ) throws PgpDecryptionException {
+        byte[] decodedCipherText = decodeText(cipherText);
+
+        try (InputStream cipherStream = new ByteArrayInputStream(decodedCipherText);
+             ByteArrayOutputStream plainStream = new ByteArrayOutputStream()) {
+            decrypt(cipherStream, plainStream, verifyingKeys, decryptionKeys);
+            byte[] plainBytes = plainStream.toByteArray();
+            return new String(plainBytes, this.charset);
+        } catch (IOException exception) {
+            throw new PgpDecryptionException("Read/write error", exception);
+        }
+    }
+
+    private byte[] decodeText(String input) {
+        switch (this.binaryToTextEncoding) {
+            case BASE32:
+                return BaseEncoding.base32().decode(input);
+            case BASE64:
+                return BaseEncoding.base64().decode(input);
+            case BASE64_URL:
+                return BaseEncoding.base64Url().decode(input);
+            case NONE:
+                return input.getBytes(this.charset);
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported binary-to-text encoding scheme: " + this.binaryToTextEncoding
+                );
+        }
     }
 
     /**

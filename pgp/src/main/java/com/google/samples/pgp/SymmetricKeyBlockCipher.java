@@ -13,17 +13,13 @@
 // limitations under the License.
 package com.google.samples.pgp;
 
-import org.bouncycastle.openpgp.PGPException;
-
 /**
- * Custom base exception.
+ * Supported symmetric key block ciphers
  */
-public class PgpException extends PGPException {
-    public PgpException(String message, Exception innerException) {
-        super(message, innerException);
-    }
-
-    public PgpException(String message) {
-        super(message);
-    }
+public enum SymmetricKeyBlockCipher {
+    AES_256,
+    BLOWFISH,
+    CAMELLIA_256,
+    TRIPLE_DES,
+    TWOFISH,
 }

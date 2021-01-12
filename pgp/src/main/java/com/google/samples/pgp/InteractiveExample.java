@@ -1,4 +1,4 @@
-// Copyright 2020 Google LLC
+// Copyright 2021 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ public final class InteractiveExample {
                     case "0":
                         encryptor.setAsciiArmour(!encryptor.isAsciiArmour());
                         System.out.println(
-                            "ASCII armor " + (encryptor.isAsciiArmour() ? "enabled." : "disabled.")
+                                "ASCII armor " + (encryptor.isAsciiArmour() ? "enabled." : "disabled.")
                         );
                         break;
                     case "1":
@@ -81,7 +81,7 @@ public final class InteractiveExample {
     }
 
     private static void addPublicKeys(PgpKeyManager keyManager)
-        throws IOException, KeyManagementException {
+            throws IOException, KeyManagementException {
         System.out.print("Path to public key: ");
         String filePath = READER.readLine();
 
@@ -115,7 +115,7 @@ public final class InteractiveExample {
     }
 
     private static void addSecretKeys(PgpKeyManager keyManager)
-        throws IOException, KeyManagementException {
+            throws IOException, KeyManagementException {
         System.out.print("Path to secret key: ");
         String filePath = READER.readLine();
         System.out.print("Secret key passphrase: ");
@@ -141,7 +141,7 @@ public final class InteractiveExample {
     }
 
     private static void encryptMessage(PgpEncryptor encrypter)
-        throws IOException, PgpEncryptionException {
+            throws IOException, PgpEncryptionException {
         System.out.print("Message to encrypt: ");
         String plainText = READER.readLine();
 
@@ -162,7 +162,7 @@ public final class InteractiveExample {
     }
 
     private static void decryptMessage(PgpEncryptor encrypter)
-        throws IOException, PgpDecryptionException {
+            throws IOException, PgpDecryptionException {
         System.out.print("Message to decrypt: ");
         String cipherText = READER.readLine();
 

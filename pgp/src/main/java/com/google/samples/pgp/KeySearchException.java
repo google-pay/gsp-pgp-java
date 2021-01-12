@@ -13,17 +13,11 @@
 // limitations under the License.
 package com.google.samples.pgp;
 
-import org.bouncycastle.openpgp.PGPException;
-
 /**
- * Custom base exception.
+ * Custom exception for any error related to key search.
  */
-public class PgpException extends PGPException {
-    public PgpException(String message, Exception innerException) {
-        super(message, innerException);
-    }
-
-    public PgpException(String message) {
+public class KeySearchException extends RuntimeException {
+    public KeySearchException(String message) {
         super(message);
     }
 }

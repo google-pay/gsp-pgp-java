@@ -41,12 +41,17 @@ The class supports the following flags:
 
 ```shell
  -a,--ascii-armour       ASCII armoured message
+ -c,--encoding <arg>     Binary-to-text encoding scheme
  -d,--decrypt            Decrypt cipher text
  -e,--encrypt            Encrypt plain text
+ -f,--file <arg>         Path of the file to process
+ -k,--secret-key <arg>   Secret key path
  -m,--message <arg>      Message to process
  -n,--no-passphrase      No passphrase secret key
+ -o,--output <arg>       Destination file path
  -p,--public-key <arg>   Public key path
- -s,--secret-key <arg>   Secret key path
+ -r,--recipient <arg>    ID of the recipient
+ -s,--sender <arg>       ID of the sender
 ```
 
 ## How the example works
@@ -83,6 +88,24 @@ it is shown below:
   PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance());
   String cipherText = encryptor.encrypt(plainText);
   String plainText = encryptor.decrypt(cipherText);
+```
+
+### File Encryption
+
+You can also use the example to handle file encryption and decryption. A quick
+encryption example below:
+
+```java
+  Path inputPath = Paths.get(filePath);
+  Path outputPath = Paths.get(outputFilePath);
+
+  try(InputStream inputStream = Files.newInputStream(inputPath, ...);
+      OutputStream outputStream = Files.newOutputStream(outputPath, ...)) {
+    encryptor.encrypt(inputStream, outputStream, senders, recipients);
+  } catch (PgpException | KeySearchException exception) {
+    Files.deleteIfExists(outputPath);
+    throw exception;
+  }
 ```
 
 ### Using it in a Web App
