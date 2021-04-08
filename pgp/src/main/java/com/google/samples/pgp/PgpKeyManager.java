@@ -58,7 +58,6 @@ import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider;
 public final class PgpKeyManager implements KeyManager,
         KeyProvider<PGPPublicKey, PGPSecretKey, PGPPrivateKey> {
     private static final Logger LOGGER = LogManager.getLogger(PgpKeyManager.class);
-    private static volatile PgpKeyManager INSTANCE;
 
     static {
         Security.addProvider(new BouncyCastleProvider());
@@ -71,19 +70,7 @@ public final class PgpKeyManager implements KeyManager,
     private final KeyFingerPrintCalculator keyFingerPrintCalculator;
     private final PGPDigestCalculatorProvider digestCalculatorProvider;
 
-    public static PgpKeyManager getInstance() {
-        if (INSTANCE == null) {
-            synchronized (PgpKeyManager.class) {
-                if (INSTANCE == null) {
-                    INSTANCE = new PgpKeyManager();
-                }
-            }
-        }
-
-        return INSTANCE;
-    }
-
-    private PgpKeyManager() {
+    public PgpKeyManager() {
         this.privateKeys = new ConcurrentHashMap<>();
         this.keyFingerPrintCalculator = new BcKeyFingerprintCalculator();
         this.digestCalculatorProvider = new BcPGPDigestCalculatorProvider();

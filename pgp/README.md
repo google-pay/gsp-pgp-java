@@ -72,7 +72,7 @@ easily as:
 
   ...
 
-  KeyManager keyManager = PgpKeyManager.getInstance();
+  PgpKeyManager keyManager = new PgpKeyManager();
 
   try (InputStream publicKeys = Files.newInputStream(PUBLIC_KEYS_PATH);
        InputStream secretKeys = Files.newInputStream(SECRET_KEYS_PATH)) {
@@ -85,7 +85,7 @@ Then you can inject the PgpKeyManager to a PgpEncryptor instance and use it as
 it is shown below:
 
 ```java
-  PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance());
+  PgpEncryptor encryptor = new PgpEncryptor(keyManager);
   String cipherText = encryptor.encrypt(plainText);
   String plainText = encryptor.decrypt(cipherText);
 ```
@@ -125,7 +125,7 @@ A simple example on how to achieve this is in
   @Test
   void multiThreadEncryption() {
     ThreadLocal<PgpEncryptor> encryptor =
-        ThreadLocal.withInitial(() -> new PgpEncryptor(PgpKeyManager.getInstance()));
+        ThreadLocal.withInitial(() -> new PgpEncryptor(KEY_MANAGER));
 
     IntStream.range(1, 10)
         .parallel()
