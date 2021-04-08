@@ -33,7 +33,7 @@ public final class InteractiveExample {
 
     public static void main(String... args) throws IOException {
         String option;
-        PgpKeyManager keyManager = PgpKeyManager.getInstance();
+        PgpKeyManager keyManager = new PgpKeyManager();
         PgpEncryptor encryptor = new PgpEncryptor(keyManager);
 
         do {

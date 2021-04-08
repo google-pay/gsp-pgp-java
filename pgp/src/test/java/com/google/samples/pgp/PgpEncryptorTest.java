@@ -55,22 +55,21 @@ class PgpEncryptorTest {
     private static final String CHUCK_ID = "Chuck <chuck@example.com>";
 
     private static final ExecutorService EXECUTOR_SERVICE = Executors.newSingleThreadExecutor();
+    private static final PgpKeyManager KEY_MANAGER = new PgpKeyManager();
 
     @BeforeAll
     static void addKeys() throws IOException, KeyManagementException {
-        KeyManager keyManager = PgpKeyManager.getInstance();
-
         try (InputStream publicKeys = Files.newInputStream(PUBLIC_KEYS_PATH);
              InputStream secretKeys = Files.newInputStream(SECRET_KEYS_PATH)) {
-            keyManager.addPublicKeys(publicKeys);
-            keyManager.addSecretKeys(secretKeys, ALICE_PASSPHRASE, BOB_PASSPHRASE);
+            KEY_MANAGER.addPublicKeys(publicKeys);
+            KEY_MANAGER.addSecretKeys(secretKeys, ALICE_PASSPHRASE, BOB_PASSPHRASE);
         }
     }
 
     @Test
     void multiThreadEncryption() {
         ThreadLocal<PgpEncryptor> encryptor =
-                ThreadLocal.withInitial(() -> new PgpEncryptor(PgpKeyManager.getInstance()));
+                ThreadLocal.withInitial(() -> new PgpEncryptor(KEY_MANAGER));
 
         IntStream.range(1, 10)
                 .parallel()
@@ -113,7 +112,7 @@ class PgpEncryptorTest {
     @ParameterizedTest
     @MethodSource("validMultiKeyEncryptionParameters")
     void multiKeyEncryption(String[] senders, String[] recipients) throws PgpException {
-        PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance());
+        PgpEncryptor encryptor = new PgpEncryptor(KEY_MANAGER);
         String plainText = RandomStringUtils.random(10, true, true);
         String cipherText = encryptor.encrypt(plainText, senders, recipients);
         String result = encryptor.decrypt(cipherText, senders, recipients);
@@ -137,7 +136,7 @@ class PgpEncryptorTest {
     @ParameterizedTest
     @MethodSource("invalidMultiKeyEncryptionParameters")
     void failingMultiKeyEncryption(String[] senders, String[] recipients) {
-        PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance());
+        PgpEncryptor encryptor = new PgpEncryptor(KEY_MANAGER);
         String plainText = RandomStringUtils.random(10, true, true);
 
         assertThrows(KeySearchException.class, () -> {
@@ -148,7 +147,7 @@ class PgpEncryptorTest {
 
     @Test
     void fileEncryption() throws IOException, NoSuchAlgorithmException, PgpException {
-        PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance());
+        PgpEncryptor encryptor = new PgpEncryptor(KEY_MANAGER);
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         Path filePath = RESOURCES_PATH.resolve("greetings.txt");
 
@@ -200,7 +199,7 @@ class PgpEncryptorTest {
             value = BinaryToTextEncoding.class, mode = EnumSource.Mode.EXCLUDE, names = {"NONE"}
     )
     void testEncodings(BinaryToTextEncoding encoding) throws PgpException {
-        PgpEncryptor encryptor = new PgpEncryptor(PgpKeyManager.getInstance())
+        PgpEncryptor encryptor = new PgpEncryptor(KEY_MANAGER)
                 .setBinaryToTextEncoding(encoding);
         String plainText = "A message";
         String cipherText = encryptor.encrypt(plainText);

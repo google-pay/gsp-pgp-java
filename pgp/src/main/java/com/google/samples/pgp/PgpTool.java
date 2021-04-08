@@ -42,7 +42,7 @@ public final class PgpTool {
     };
 
     private static final Options OPTIONS = PgpTool.createOptions();
-    private static final PgpKeyManager KEY_MANAGER = PgpKeyManager.getInstance();
+    private static final PgpKeyManager KEY_MANAGER = new PgpKeyManager();
 
     private final PgpEncryptor encryptor;
     private CommandLine commandLine;
